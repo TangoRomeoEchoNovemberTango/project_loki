@@ -703,22 +703,33 @@ export const ContactsDirectory: React.FC<ContactsDirectoryProps> = ({
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden">
           <div className="w-full max-w-3xl my-auto max-h-[90vh] overflow-y-auto">
-            <QuickAddContactForm
-              initialRole="OTHER"
-              initialData={editingContact || undefined}
-              title={editingContact ? 'Edit Contact Record' : 'Add New CRM Contact'}
-              onSaveContact={async (data) => {
-                if (editingContact) {
-                  await onUpdateContact({ ...data, id: editingContact.id });
-                } else {
-                  await onCreateContact({ ...data, role: data.role || 'OTHER' });
-                }
-              }}
-              onClose={() => {
-                setIsModalOpen(false);
-                setEditingContact(null);
-              }}
-            />
+{isModalOpen && (
+  <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-hidden">
+    <div className="w-full max-w-3xl my-auto max-h-[90vh] overflow-y-auto">
+      <QuickAddContactForm
+        initialRole="OTHER"
+        initialData={editingContact || undefined}
+        title={editingContact ? 'Edit Contact Record' : 'Add New CRM Contact'}
+        availableDeals={leads}
+        onCreateDeal={onSaveLead}
+        onCreateProperty={onCreateProperty}
+        territories={territories}
+        callLogs={callLogs}
+        onSaveContact={async (data) => {
+          if (editingContact) {
+            await onUpdateContact({ ...data, id: editingContact.id });
+          } else {
+            await onCreateContact({ ...data, role: data.role || 'OTHER' });
+          }
+        }}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingContact(null);
+        }}
+      />
+    </div>
+  </div>
+)}
           </div>
         </div>
       )}

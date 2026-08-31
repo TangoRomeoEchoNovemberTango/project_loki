@@ -1,8 +1,9 @@
 import React from 'react';
 import type { Contact, AgentSpecialty } from '@/types/dealflow';
 import {
-  SectionCard, Field, TextInput, SelectInput, TextArea, ToggleRow
+  SectionCard, TextInput, SelectInput, ToggleRow
 } from './ContactFieldPrimitives';
+import { OfficeAddressSection } from './OfficeAddressSection';
 
 interface AgentFieldsProps {
   contact: Partial<Contact>;
@@ -49,44 +50,13 @@ export const AgentFields: React.FC<AgentFieldsProps> = ({ contact, onChange }) =
         </div>
       </SectionCard>
 
-      {/* Agency Office Address */}
-      <SectionCard title="Agency Office Address">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <div className="sm:col-span-2">
-            <TextInput
-              label="Street Address"
-              value={contact.agencyStreetAddress}
-              onChange={(v) => onChange({ agencyStreetAddress: v })}
-              placeholder="e.g. 1200 S 6th St"
-            />
-          </div>
-          <TextInput
-            label="Suite / Ste #"
-            value={contact.agencyUnit}
-            onChange={(v) => onChange({ agencyUnit: v })}
-            placeholder="e.g. Suite 200"
-          />
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <TextInput
-            label="City"
-            value={contact.agencyCity}
-            onChange={(v) => onChange({ agencyCity: v })}
-            placeholder="Springfield"
-          />
-          <TextInput
-            label="State"
-            value={contact.agencyState}
-            onChange={(v) => onChange({ agencyState: v })}
-            placeholder="IL"
-          />
-          <TextInput
-            label="Zip Code"
-            value={contact.agencyZip}
-            onChange={(v) => onChange({ agencyZip: v })}
-            placeholder="62701"
-          />
-        </div>
+      {/* ── Agency Office Address (with the slider) ── */}
+      <OfficeAddressSection
+        contact={contact}
+        onChange={onChange}
+        title="Agency Office Address"
+      >
+        {/* Role-specific extra passed as children */}
         <TextInput
           label="Agency Website / Profile URL"
           value={contact.agencyWebsite}
@@ -94,7 +64,7 @@ export const AgentFields: React.FC<AgentFieldsProps> = ({ contact, onChange }) =
           placeholder="https://www.remaxspringfield.com/agents/sarah"
           type="url"
         />
-      </SectionCard>
+      </OfficeAddressSection>
 
       {/* Wholesaling Capabilities */}
       <SectionCard title="Wholesaling & Investor Capabilities">

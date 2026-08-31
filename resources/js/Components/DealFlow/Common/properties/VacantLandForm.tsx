@@ -1,26 +1,12 @@
 import React from 'react';
 import { MapPin, Trees, Droplets, DollarSign } from 'lucide-react';
 
-export interface VacantLandDetails {
-  parcelId?: string;
-  legalDescription?: string;
-  zoning?: string;
-  topography?: string;
-  floodZone?: string;
-  accessType?: string;
-  roadFrontage?: string;
-  waterAccess?: string;
-  sewerAccess?: string;
-  powerAccess?: string;
-  percTest?: string;
-  annualTaxes?: number | '';
-  backTaxes?: number | '';
-  liensOwed?: number | '';
-  hasHoaPoa?: boolean;
-  hoaDues?: number | '';
-  mineralRightsConvey?: boolean;
-  surveyAvailable?: boolean;
-}
+import type { VacantLandDetails } from '@/types/dealflow'; // ✅ now lives in the types file
+
+// ✅ Pass-through so old import paths keep working
+export type { VacantLandDetails };
+
+
 
 interface VacantLandFormProps {
   land: VacantLandDetails;

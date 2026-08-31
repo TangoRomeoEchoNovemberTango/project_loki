@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Landmark, Sparkles } from 'lucide-react';
 import type {
-  Lead, Contact, Buyer, TitleCompany, ContactRole, LeadStage, Territory,
+  Lead, Contact, ContactRole, LeadStage, Territory,
   PipelineType, GovListType, Property, CallLog,
 } from '@/types/dealflow';
 import { DealTypeSelector } from '../Common/financials/DealTypeSelector';
 import { PipelineStageSelector } from '../Common/leads/PipelineStageSelector';
+import { DealIdentitySection } from '../Common/deals/DealIdentitySection';
 import { DealNotesForm } from '../Common/leads/DealNotesForm';
 import { PropertyLinkPicker } from '../Common/properties/PropertyLinkPicker';
 import { ContactIntakePicker, emptyContactSnapshot } from '../Common/contacts/ContactIntakePicker';
@@ -36,51 +37,67 @@ const ON_MARKET_STAGES = [
 interface AddLeadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveLead: (leadData: Partial<Lead>) => Promise<void>;
+  // ✅ UPDATED: return the created object so we can grab its database ID
+  onSaveLead: (leadData: Partial<Lead>) => Promise<Lead | void>;
+  onCreateContact?: (contactData: Partial<Contact>) => Promise<Contact | void>;
+  onCreateProperty?: (propertyData: Partial<Property>) => Promise<Property | void>;
   territories?: Territory[];
   contacts?: Contact[];
   properties?: Property[];
   leads?: Lead[];
   callLogs?: CallLog[];
-  buyers?: Buyer[];
-  titleCompanies?: TitleCompany[];
   selectedTerritoryId?: string | null;
-  onCreateContact?: (contactData: Partial<Contact>) => Promise<void>;
-  onCreateProperty?: (propertyData: Partial<Property>) => Promise<void>;
-  onAddBuyer?: (buyerData: Partial<Buyer>) => Promise<void>;
-  onAddTitleCompany?: (titleCompanyData: Partial<TitleCompany>) => Promise<void>;
+  // ❌ REMOVED: buyers, titleCompanies, onAddBuyer, onAddTitleCompany (ghost tables!)
 }
 
 export const AddLeadModal: React.FC<AddLeadModalProps> = ({
-  isOpen, onClose, onSaveLead, territories = [], contacts = [], properties = [],
-  leads = [], callLogs = [], buyers = [], titleCompanies = [], selectedTerritoryId,
-  onCreateContact, onCreateProperty, onAddBuyer, onAddTitleCompany,
+  isOpen, onClose, onSaveLead, onCreateContact, onCreateProperty,
+  territories = [], contacts = [], properties = [], leads = [], callLogs = [],
+  selectedTerritoryId,
 }) => {
-  if (!isOpen) return null;
+  // ── Deal Identity State ───────────────────────────────────────────────────
+  const [dealNumber, setDealNumber] = useState('');
+  const [dealName, setDealName] = useState('');
+  const [createdAt, setCreatedAt] = useState('');
 
-  // ── Deal type / stage ──────────────────────────────────────────────────────
+  // Auto-generate Deal Number and Timestamp when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const year = new Date().getFullYear();
+      const randomId = Math.floor(1000 + Math.random() * 9000);
+      setDealNumber(`DEAL-${year}-${randomId}`);
+      setCreatedAt(new Date().toISOString());
+    }
+  }, [isOpen]);
+
+  // ── Deal type / stage ─────────────────────────────────────────────────────
   const [dealType, setDealType] = useState<PipelineType>('OFF_MARKET_GOV');
   const [govListType, setGovListType] = useState<GovListType>('PROBATE');
   const [stage, setStage] = useState<LeadStage>('GOV_LIST_PULLED');
 
   // ── Property / lead link (owned by PropertyLinkPicker) ────────────────────
+  // Holds whatever ID the picker hands back (property id or legacy lead id).
   const [leadId, setLeadId] = useState('');
 
   // ── Contact intake (single snapshot owned by ContactIntakePicker) ─────────
   const [contactSnapshot, setContactSnapshot] = useState<ContactIntakeSnapshot>(emptyContactSnapshot());
-
-  // Destructure for parity with downstream logic (currentContact + submit)
   const {
     firstName: contactFirstName, lastName: contactLastName, phone: contactPhone,
     email: contactEmail, role: contactRole, company: contactCompany, draft: contactDraft,
   } = contactSnapshot;
 
-  // ── Notes / UI ─────────────────────────────────────────────────────────────
+  // ── Notes / UI ────────────────────────────────────────────────────────────
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // ✅ Lookups: the picker may hand back a property id OR a legacy lead id
+  const selectedPropertyObj = properties.find((p) => p.id === leadId);
   const selectedLeadObj = leads.find((l) => l.id === leadId);
+
+  // ⚠️ FIX: early return moved AFTER all hooks (hooks must run in the same
+  // order every render — the old placement was a latent crash bug).
+  if (!isOpen) return null;
 
   const handleDealTypeChange = (newType: PipelineType) => {
     setDealType(newType);
@@ -89,60 +106,82 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
     setContactSnapshot((prev) => ({ ...prev, role: defaultRole, draft: { ...prev.draft, role: defaultRole } }));
   };
 
-  // PropertyLinkPicker selection: link the lead + auto-fill contact only if empty
-  const handleLeadSelect = (selectedLeadId: string) => {
-    setLeadId(selectedLeadId);
-    const lead = leads.find((l) => l.id === selectedLeadId);
-    if (!lead) return;
+  const handleLeadSelect = (selectedId: string) => {
+    setLeadId(selectedId);
+    // Normalized auto-fill: walk lead → contactId → contacts table
+    const lead = leads.find((l) => l.id === selectedId);
+    const linkedContact = lead?.contactId ? contacts.find((c) => c.id === lead.contactId) : undefined;
+    if (!linkedContact) return;
     setContactSnapshot((prev) => {
       if (prev.firstName || prev.phone) return prev;
       return {
         ...prev,
-        firstName: lead.contactFirstName || (lead.contactName || '').split(' ')[0] || '',
-        lastName: lead.contactLastName || (lead.contactName || '').split(' ').slice(1).join(' ') || '',
-        phone: lead.contactPhone || '',
-        email: lead.contactEmail || prev.email,
-        role: lead.contactRole || prev.role,
+        isExistingContactSelected: true,
+        selectedContactId: linkedContact.id,
+        firstName: linkedContact.firstName || '',
+        lastName: linkedContact.lastName || '',
+        phone: linkedContact.phone || '',
+        email: linkedContact.email || prev.email,
+        role: (linkedContact.primaryRole || linkedContact.role || prev.role) as ContactRole,
       };
     });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
+    setErrorMsg('');
+
     try {
-      setIsSaving(true); setErrorMsg('');
-      if (!leadId) {
-        setErrorMsg('No property linked yet — use "+ Quick Add Property" in the Property Link section to create the property & wholesale lead first, then save.');
-        setIsSaving(false);
-        return;
-      }
-      // 1) Persist a brand-new contact intake (picker already saved anything marked existing)
+      // ════════════════════════════════════════════════════════════════════
+      // STEP 1: Resolve the CONTACT ID (optional linking!)
+      // ════════════════════════════════════════════════════════════════════
+      let finalContactId: string | null =
+        contactSnapshot.selectedContactId || selectedLeadObj?.contactId || null;
+
       if (!contactSnapshot.isExistingContactSelected && contactFirstName.trim() && contactPhone.trim() && onCreateContact) {
-        await onCreateContact({
+        // Create the contact FIRST, catch the receipt, grab the new ID
+        const newContact = await onCreateContact({
           ...contactDraft,
-          firstName: contactFirstName, lastName: contactLastName, role: contactRole,
-          phone: contactPhone, email: contactEmail, company: contactCompany || contactDraft.company,
-          associatedPropertyAddress: selectedLeadObj?.propertyAddress,
+          firstName: contactFirstName,
+          lastName: contactLastName,
+          phone: contactPhone,
+          email: contactEmail,
+          company: contactCompany || contactDraft.company,
+          roles: [contactRole],          // ✅ NEW multi-role array
+          primaryRole: contactRole,      // ✅ NEW primary hat
+          role: contactRole,             // legacy bridge until picker migrates
+          associatedPropertyAddress: selectedPropertyObj?.streetAddress,
           leadId: leadId || undefined,
           notes: contactDraft.notes,
           source: 'ADD_LEAD',
         });
+        if (newContact && newContact.id) finalContactId = newContact.id;
       }
-      // 2) Sync the deal: stage, deal type, contact & notes onto the linked lead
+
+      // ════════════════════════════════════════════════════════════════════
+      // STEP 2: Resolve the PROPERTY ID (optional linking!)
+      // ════════════════════════════════════════════════════════════════════
+      const finalPropertyId =
+        selectedPropertyObj?.id ?? selectedLeadObj?.propertyId ?? null;
+
+      // ════════════════════════════════════════════════════════════════════
+      // STEP 3: Save the NORMALIZED LEAD (IDs only — no raw text!)
+      // ════════════════════════════════════════════════════════════════════
       await onSaveLead({
-        id: leadId,
+        id: selectedLeadObj?.id, // set only when updating an existing lead
+        dealNumber,
+        dealName,
+        createdAt,
         dealType,
         govListType: dealType === 'OFF_MARKET_GOV' ? govListType : undefined,
         stage,
-        contactName: `${contactFirstName} ${contactLastName}`.trim() || undefined,
-        contactFirstName: contactFirstName || undefined,
-        contactLastName: contactLastName || undefined,
-        contactPhone: contactPhone || undefined,
-        contactEmail: contactEmail || undefined,
-        contactRole,
+        propertyId: finalPropertyId,
+        contactId: finalContactId,
         notes: notes.trim() || undefined,
         nextFollowUpDate: new Date(Date.now() + 86400000).toISOString(),
       });
+
       onClose();
     } catch (err) {
       console.error(err);
@@ -155,6 +194,7 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-hidden">
       <div className="bg-slate-900 border border-amber-500/40 rounded-2xl w-full max-w-3xl max-h-[90vh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 p-4 sm:p-5 shrink-0 bg-slate-900">
           <div>
@@ -174,10 +214,23 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
           <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs flex-1">
             {errorMsg && <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-300 font-semibold">{errorMsg}</div>}
 
-            {/* 1. Market Deal Type (external brick) */}
-            <DealTypeSelector dealType={dealType} govListType={govListType} onDealTypeChange={handleDealTypeChange} onGovListTypeChange={setGovListType} />
+            {/* ── Deal Identity Section ───────────────────────────────────── */}
+            <DealIdentitySection
+              dealNumber={dealNumber}
+              createdAt={createdAt}
+              dealName={dealName}
+              onDealNameChange={setDealName}
+            />
 
-            {/* 2. Target Pipeline Stage (external brick) */}
+            {/* 1. Market Deal Type */}
+            <DealTypeSelector
+              dealType={dealType}
+              govListType={govListType}
+              onDealTypeChange={handleDealTypeChange}
+              onGovListTypeChange={setGovListType}
+            />
+
+            {/* 2. Target Pipeline Stage */}
             <PipelineStageSelector
               value={stage}
               onChange={(s) => setStage(s as LeadStage)}
@@ -185,7 +238,7 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
               hint={`Defaults to Column 1 (${dealType === 'OFF_MARKET_GOV' ? '1. Gov List Pulled' : 'New On-Market'})`}
             />
 
-            {/* 3. Property / Lead link + quick add (external brick) */}
+            {/* 3. Property / Lead link + quick add */}
             <PropertyLinkPicker
               leads={leads}
               properties={properties}
@@ -201,23 +254,19 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
               onContactSuggestion={(s) => setContactSnapshot((prev) => ({ ...prev, firstName: s.firstName, lastName: s.lastName, phone: s.phone, role: s.role, draft: { ...prev.draft, role: s.role } }))}
             />
 
-            {/* 4. Contact intake + quick add (external brick) */}
+            {/* 4. Contact intake (ghost-table props removed) */}
             <ContactIntakePicker
               contacts={contacts}
-              buyers={buyers}
-              titleCompanies={titleCompanies}
               leads={leads}
               snapshot={contactSnapshot}
               onSnapshotChange={setContactSnapshot}
               onCreateContact={onCreateContact}
-              onAddBuyer={onAddBuyer}
-              onAddTitleCompany={onAddTitleCompany}
-              associatedPropertyAddress={selectedLeadObj?.propertyAddress}
+              associatedPropertyAddress={selectedPropertyObj?.streetAddress}
               leadId={leadId || undefined}
               label="Search Existing Contacts or Add New"
             />
 
-            {/* 5. Initial Deal Notes (external brick) */}
+            {/* 5. Initial Deal Notes */}
             <DealNotesForm notes={notes} onNotesChange={setNotes} rows={2} />
           </div>
 

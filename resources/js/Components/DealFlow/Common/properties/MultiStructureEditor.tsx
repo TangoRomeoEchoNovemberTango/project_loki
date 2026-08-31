@@ -1,22 +1,10 @@
 import React from 'react';
 import { Home, Layers, Plus, Trash2 } from 'lucide-react';
-import type { PropertyType, OccupancyStatus, Territory } from '@/types/dealflow';
-import { StructureForm } from './StructureForm';
+import type { Territory, StructureEntry } from '@/types/dealflow';
+import { StructureForm } from './StructureForm'; // ← add this line back
+export type { StructureEntry }; // pass-through for old imports
 
-export interface StructureEntry {
-  id: string;
-  label: string;
-  street: string;
-  unit: string;
-  city: string;
-  state: string;
-  zip: string;
-  propertyType: PropertyType;
-  beds: number | '';
-  baths: number | '';
-  sqft: number | '';
-  occupancy: OccupancyStatus;
-}
+
 
 export const emptyStructureEntry = (label: string, defaults?: Partial<StructureEntry>): StructureEntry => ({
   id: `struct-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,

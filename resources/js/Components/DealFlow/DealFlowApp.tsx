@@ -160,11 +160,19 @@ export default function DealFlowApp() {
         }
     };
 
-    const handleSaveLead = async (leadData: Partial<Lead>): Promise<void> => {
-    const created = await createLead(leadData);
-
-    setLeads((prev) => [created, ...prev]);
-};
+    const handleSaveLead = async (leadData: Partial<Lead>): Promise<Lead> => {
+        if (leadData.id) {
+            const saved = await updateLead(leadData.id, leadData);
+            setLeads((prev) => prev.map((l) => (l.id === saved.id ? saved : l)));
+            if (selectedDetailLead?.id === saved.id) {
+                setSelectedDetailLead(saved);
+            }
+            return saved;
+        }
+        const created = await createLead(leadData);
+        setLeads((prev) => [created, ...prev]);
+        return created;
+    };
 
     const handleUpdateLead = async (updatedLead: Lead) => {
         const saved = await updateLead(updatedLead.id, updatedLead);
@@ -219,12 +227,12 @@ export default function DealFlowApp() {
     };
 
     const handleUpdateCallLog = async (updatedCallLog: CallLog) => {
-    const saved = await updateCallLog(updatedCallLog.id, updatedCallLog);
+        const saved = await updateCallLog(updatedCallLog.id, updatedCallLog);
 
-    setCallLogs((prev) =>
-        prev.map((c) => (c.id === saved.id ? saved : c)),
-    );
-};
+        setCallLogs((prev) =>
+            prev.map((c) => (c.id === saved.id ? saved : c)),
+        );
+    };
 
     const handleDeleteCallLog = async (id: string) => {
         await deleteCallLog(id);
@@ -274,10 +282,10 @@ export default function DealFlowApp() {
         setTitleCompanies((prev) => prev.filter((tc) => tc.id !== id));
     };
 
-    const handleCreateContact = async (data: Partial<Contact>) => {
+    const handleCreateContact = async (data: Partial<Contact>): Promise<Contact> => {
         const created = await createContact(data);
-
         setContacts((prev) => [created, ...prev]);
+        return created;
     };
 
     const handleUpdateContact = async (data: Partial<Contact>) => {
@@ -296,10 +304,10 @@ export default function DealFlowApp() {
         setContacts((prev) => prev.filter((c) => c.id !== id));
     };
 
-    const handleCreateProperty = async (data: Partial<Property>) => {
+    const handleCreateProperty = async (data: Partial<Property>): Promise<Property> => {
         const created = await createProperty(data);
-
         setProperties((prev) => [created, ...prev]);
+        return created;
     };
 
     const handleUpdateProperty = async (data: Partial<Property>) => {
@@ -336,28 +344,39 @@ export default function DealFlowApp() {
 
     const activeTerritory = territories.find((t) => t.id === selectedTerritoryId);
 
+    // ✅ FIX: Walk through properties to find the zip/territory for normalized leads
     const displayLeads = selectedTerritoryId
-        ? leads.filter(
-              (l) =>
-                  l.territoryId === selectedTerritoryId ||
-                  Boolean(activeTerritory && activeTerritory.zipCodes.includes(l.zip)),
-          )
+        ? leads.filter((l) => {
+              if (!activeTerritory) return false;
+              const linkedProperty = l.propertyId ? properties.find((p) => p.id === l.propertyId) : undefined;
+              const leadTerritoryId = linkedProperty?.territoryId;
+              const leadZip = linkedProperty?.zip;
+              return (
+                  leadTerritoryId === selectedTerritoryId ||
+                  Boolean(leadZip && activeTerritory.zipCodes.includes(leadZip))
+              );
+          })
         : leads;
 
     const displayLeadIds = new Set(displayLeads.map((l) => l.id));
 
+    // ✅ FIX: Walk through properties to check address/zips for normalized calls
     const displayCalls = selectedTerritoryId
-        ? callLogs.filter(
-              (c) =>
-                  Boolean(c.leadId && displayLeadIds.has(c.leadId)) ||
-                  displayLeads.some((l) => l.propertyAddress === c.leadAddress) ||
-                  Boolean(
-                      activeTerritory &&
-                          activeTerritory.zipCodes.some(
-                              (z) => c.leadAddress?.includes(z) ?? false,
-                          ),
-                  ),
-          )
+        ? callLogs.filter((c) => {
+              if (c.leadId && displayLeadIds.has(c.leadId)) return true;
+              
+              if (c.leadId) {
+                  const linkedLead = leads.find((l) => l.id === c.leadId);
+                  const linkedProperty = linkedLead?.propertyId ? properties.find((p) => p.id === linkedLead.propertyId) : undefined;
+                  const propAddress = linkedProperty?.streetAddress;
+                  const propZip = linkedProperty?.zip;
+                  
+                  if (propAddress && c.leadAddress && propAddress === c.leadAddress) return true;
+                  if (activeTerritory && propZip && activeTerritory.zipCodes.includes(propZip)) return true;
+                  if (activeTerritory && c.leadAddress && activeTerritory.zipCodes.some((z) => c.leadAddress?.includes(z) ?? false)) return true;
+              }
+              return false;
+          })
         : callLogs;
 
     const displayBuyers =
@@ -527,7 +546,7 @@ export default function DealFlowApp() {
                                 onOpenDialer={handleOpenDialer}
                                 onOpenAddLeadModal={() => setIsAddLeadOpen(true)}
                                 onStageChange={handleStageChange}
-                                onUpdateLead={handleSaveLead}
+                                onUpdateLead={handleUpdateLead}
                                 onDeleteLead={handleDeleteLead}
                             />
                         )}
@@ -691,10 +710,14 @@ export default function DealFlowApp() {
                 isOpen={isAddLeadOpen}
                 onClose={() => setIsAddLeadOpen(false)}
                 onSaveLead={handleSaveLead}
+                onCreateContact={handleCreateContact}
+                onCreateProperty={handleCreateProperty}
                 territories={territories}
                 contacts={contacts}
                 properties={properties}
                 leads={leads}
+                callLogs={callLogs}
+                selectedTerritoryId={selectedTerritoryId}
             />
 
             <LeadDetailDrawer

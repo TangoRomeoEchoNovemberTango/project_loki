@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Home, Plus, X, Search, ChevronDown } from 'lucide-react';
+import { Home, Plus, X, Search, ChevronDown, Building2 } from 'lucide-react';
 import type { Lead, Property, ContactRole, Territory, CallLog } from '@/types/dealflow';
 import { PropertyDossierHUD } from './PropertyDossierHUD';
 import { QuickAddPropertyForm } from './QuickAddPropertyForm';
@@ -8,14 +8,14 @@ interface PropertyLinkPickerProps {
   leads: Lead[];
   properties?: Property[];
   callLogs?: CallLog[];
-  selectedLeadId: string;
+  selectedLeadId: string; // holds whichever raw id was picked (property OR lead)
   onSelectLead: (id: string) => void;
   onUnlink: () => void;
   territories?: Territory[];
   selectedTerritoryId?: string | null;
   currentContact?: { firstName: string; lastName: string; phone: string; role: ContactRole };
   onSaveLead?: (leadData: Partial<Lead>) => Promise<Lead | void>;
-  onCreateProperty?: (propertyData: Partial<Property>) => Promise<void>;
+  onCreateProperty?: (propertyData: Partial<Property>) => Promise<Property | void>;
   onContactSuggestion?: (s: { firstName: string; lastName: string; phone: string; role: ContactRole }) => void;
   label?: string;
 }
@@ -38,16 +38,27 @@ export const PropertyLinkPicker: React.FC<PropertyLinkPickerProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredLeads = useMemo(() => {
-    if (!propertySearchQuery.trim()) return leads;
+  // ✅ NORMALIZED: search the PROPERTIES table for addresses, LEADS for deal numbers
+  const searchEntries = useMemo(() => {
+    const entries: Array<{ id: string; kind: 'PROPERTY' | 'LEAD'; primary: string; secondary: string; badge: string }> = [];
+    properties.forEach((p) => {
+      const primary = [p.streetAddress, p.unit].filter(Boolean).join(' ');
+      const secondary = `${p.city || ''}, ${p.state || ''} ${p.zip || ''}`.trim();
+      entries.push({ id: p.id, kind: 'PROPERTY', primary: primary || 'Unnamed Property', secondary, badge: (p.propertyType || 'PROPERTY').replace(/_/g, ' ') });
+    });
+    leads.forEach((l) => {
+      entries.push({ id: l.id, kind: 'LEAD', primary: l.dealName || l.dealNumber || 'Untitled Deal', secondary: l.dealNumber || '', badge: (l.stage || 'NEW').replace(/_/g, ' ') });
+    });
     const q = propertySearchQuery.toLowerCase();
-    return leads.filter((l) => l.propertyAddress.toLowerCase().includes(q) || l.city.toLowerCase().includes(q) || l.state.toLowerCase().includes(q) || l.zip.includes(q) || (l.contactName && l.contactName.toLowerCase().includes(q)));
-  }, [leads, propertySearchQuery]);
+    if (!q.trim()) return entries;
+    return entries.filter((e) => e.primary.toLowerCase().includes(q) || e.secondary.toLowerCase().includes(q));
+  }, [properties, leads, propertySearchQuery]);
 
   const selectedLeadObj = leads.find((l) => l.id === selectedLeadId);
+  const selectedPropertyObj = properties.find((p) => p.id === selectedLeadId);
 
   const handlePick = (id: string) => {
-    onSelectLead(id);
+    onSelectLead(id); // ✅ raw id — AddLeadModal disambiguates property vs lead
     setIsPropertyDropdownOpen(false);
     setPropertySearchQuery('');
   };
@@ -63,7 +74,7 @@ export const PropertyLinkPicker: React.FC<PropertyLinkPickerProps> = ({
             <Plus className="w-3.5 h-3.5 stroke-[2.5]" /> {isQuickAddPropertyOpen ? 'Close Property Form' : '+ Quick Add Property'}
           </button>
           {selectedLeadId && (
-            <button type="button" onClick={onUnlink} className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer font-semibold"><X className="w-3.5 h-3.5" /> Unlink</button>
+            <button type="button" onClick={onUnlink} className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer font-semibold"> <X className="w-3.5 h-3.5" /> Unlink </button>
           )}
         </div>
       </div>
@@ -76,6 +87,19 @@ export const PropertyLinkPicker: React.FC<PropertyLinkPickerProps> = ({
           onSaveLead={onSaveLead ?? (async () => undefined)}
           onUnlink={onUnlink}
         />
+      ) : selectedPropertyObj ? (
+        /* ✅ Simple linked-property card (no dossier needed for a bare property) */
+        <div className="p-3 bg-slate-900 border border-emerald-500/30 rounded-xl flex items-center justify-between">
+          <div>
+            <p className="font-extrabold text-white text-xs flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{[selectedPropertyObj.streetAddress, selectedPropertyObj.unit].filter(Boolean).join(' ')}</span>
+              <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-emerald-300 font-semibold rounded border border-slate-700">{selectedPropertyObj.city}, {selectedPropertyObj.state}</span>
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Linked Property • {selectedPropertyObj.zip}</p>
+          </div>
+          <span className="text-[10px] uppercase font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">Property</span>
+        </div>
       ) : (
         <div className="relative" ref={dropdownRef}>
           <div className="relative">
@@ -85,7 +109,7 @@ export const PropertyLinkPicker: React.FC<PropertyLinkPickerProps> = ({
               value={propertySearchQuery}
               onFocus={() => setIsPropertyDropdownOpen(true)}
               onChange={(e) => { setPropertySearchQuery(e.target.value); setIsPropertyDropdownOpen(true); }}
-              placeholder="Search property address, city, zip code, or lead name..."
+              placeholder="Search property address, city, zip code, or deal #..."
               className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-9 pr-8 py-2 text-sm text-white focus:outline-none focus:border-amber-400 font-medium"
             />
             <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-2.5 pointer-events-none" />
@@ -106,21 +130,20 @@ export const PropertyLinkPicker: React.FC<PropertyLinkPickerProps> = ({
                 </div>
                 <span className="text-[10px] bg-amber-400 text-slate-950 font-extrabold px-2 py-0.5 rounded-full uppercase">Quick Add</span>
               </div>
-              {filteredLeads.length > 0 ? (
-                filteredLeads.map((l) => (
-                  <div key={l.id} onClick={() => handlePick(l.id)} className="p-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors">
+              {searchEntries.length > 0 ? (
+                searchEntries.map((e) => (
+                  <div key={`${e.kind}-${e.id}`} onClick={() => handlePick(e.id)} className="p-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors">
                     <div>
                       <p className="font-extrabold text-white text-xs flex items-center gap-1.5">
-                        <span>{l.propertyAddress}</span>
-                        <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-amber-300 font-semibold rounded border border-slate-700">{l.city}, {l.state}</span>
+                        <span>{e.primary}</span>
+                        {e.secondary && <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-amber-300 font-semibold rounded border border-slate-700">{e.secondary}</span>}
                       </p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">List: ${l.valuation?.listPrice?.toLocaleString() || 'N/A'} • Contact: {l.contactName || 'N/A'} ({l.contactPhone || 'No phone'})</p>
                     </div>
-                    <span className="text-[10px] uppercase font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">{l.stage.replace(/_/g, ' ')}</span>
+                    <span className={`text-[10px] uppercase font-mono font-bold px-2 py-1 rounded border ${e.kind === 'PROPERTY' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-sky-400 bg-sky-500/10 border-sky-500/20'}`}>{e.badge}</span>
                   </div>
                 ))
               ) : (
-                <div className="p-3 text-slate-500 text-center italic">No matching properties found</div>
+                <div className="p-3 text-slate-500 text-center italic">No matching properties or deals found</div>
               )}
             </div>
           )}

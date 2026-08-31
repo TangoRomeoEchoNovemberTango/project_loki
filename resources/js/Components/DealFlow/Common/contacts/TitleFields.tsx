@@ -1,8 +1,9 @@
 import React from 'react';
 import type { Contact } from '@/types/dealflow';
 import {
-  SectionCard, TextInput, NumberInput, SelectInput, TextArea, ToggleRow
+  SectionCard, TextInput, NumberInput, SelectInput, ToggleRow
 } from './ContactFieldPrimitives';
+import { OfficeAddressSection } from './OfficeAddressSection';
 
 interface TitleFieldsProps {
   contact: Partial<Contact>;
@@ -55,36 +56,21 @@ export const TitleFields: React.FC<TitleFieldsProps> = ({ contact, onChange }) =
         </div>
       </SectionCard>
 
-      {/* Branch Office Address */}
-      <SectionCard title="Branch Office Address" accent="text-sky-400">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <div className="sm:col-span-2">
-            <TextInput
-              label="Street Address"
-              value={contact.agencyStreetAddress}
-              onChange={(v) => onChange({ agencyStreetAddress: v })}
-              placeholder="e.g. 400 S 9th St"
-            />
-          </div>
-          <TextInput
-            label="Suite / Ste #"
-            value={contact.agencyUnit}
-            onChange={(v) => onChange({ agencyUnit: v })}
-            placeholder="e.g. Suite 200"
-          />
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <TextInput label="City" value={contact.agencyCity} onChange={(v) => onChange({ agencyCity: v })} placeholder="Springfield" />
-          <TextInput label="State" value={contact.agencyState} onChange={(v) => onChange({ agencyState: v })} placeholder="IL" />
-          <TextInput label="Zip" value={contact.agencyZip} onChange={(v) => onChange({ agencyZip: v })} placeholder="62701" mono />
-        </div>
+      {/* ── Branch Office Address (with the slider) ── */}
+      <OfficeAddressSection
+        contact={contact}
+        onChange={onChange}
+        title="Branch Office Address"
+        accent="text-sky-400"
+      >
+        {/* Role-specific extra passed as children */}
         <TextInput
           label="Counties & States Served"
           value={contact.countiesServed}
           onChange={(v) => onChange({ countiesServed: v })}
           placeholder="e.g. Sangamon, Morgan, Menard (IL)"
         />
-      </SectionCard>
+      </OfficeAddressSection>
 
       {/* Escrow Assistant */}
       <SectionCard title="Escrow Assistant / Paralegal" accent="text-sky-400">

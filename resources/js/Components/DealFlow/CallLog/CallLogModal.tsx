@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Phone, Calendar, AlertCircle, Play, Pause, RotateCcw, Sparkles } from 'lucide-react';
+import { X, Phone, Calendar, AlertCircle, Play, Pause, RotateCcw, Sparkles, UserPlus } from 'lucide-react';
 import type {
   Lead, Contact, Buyer, TitleCompany, CallDirection, CallOutcome,
   AISummary, Property, Territory, CallLog,
 } from '@/types/dealflow';
 import { analyzeCallWithAI } from '@/services/dealflow';
-import { PropertyLinkPicker } from '../Common/properties/PropertyLinkPicker';
+import { DealLinkPicker } from '../Common/deals/DealLinkPicker';
 import { ContactIntakePicker, emptyContactSnapshot } from '../Common/contacts/ContactIntakePicker';
 import type { ContactIntakeSnapshot } from '../Common/contacts/ContactIntakePicker';
 
@@ -39,8 +39,17 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // ── Property link state ────────────────────────────────────────────────────
-  const [associatedLeadId, setAssociatedLeadId] = useState<string>(selectedLead?.id || '');
+  // ── Deal-link mode toggle (checkbox) ──────────────────────────────────────
+  const [linkDealMode, setLinkDealMode] = useState<boolean>(!!selectedLead);
+  const [linkedDealIds, setLinkedDealIds] = useState<string[]>(
+    selectedLead ? [selectedLead.id] : []
+  );
+
+  // ── NEW: attach this call's contact to the linked deal(s) ─────────────────
+  const [attachContactToDeal, setAttachContactToDeal] = useState(false);
+
+  // Primary deal = first linked deal (only counts when checkbox is ON)
+  const associatedLeadId = linkDealMode ? (linkedDealIds[0] || '') : '';
 
   // ── Contact intake: single snapshot owned by ContactIntakePicker ──────────
   const [contactSnapshot, setContactSnapshot] = useState<ContactIntakeSnapshot>(() => {
@@ -67,7 +76,6 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
     return snap;
   });
 
-  // Destructure for parity with downstream logic (AI + submit keep old names)
   const {
     firstName: contactFirstName, lastName: contactLastName, phone: contactPhone,
     email: contactEmail, role: contactRole, company: contactCompany, draft: contactDraft,
@@ -93,7 +101,8 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
   // Sync snapshot when a selectedLead is passed in (or changes)
   useEffect(() => {
     if (selectedLead) {
-      setAssociatedLeadId(selectedLead.id);
+      setLinkDealMode(true);
+      setLinkedDealIds((prev) => (prev.includes(selectedLead.id) ? prev : [selectedLead.id, ...prev]));
       setContactSnapshot((prev) => ({
         ...prev,
         firstName: selectedLead.contactFirstName || (selectedLead.contactName || '').split(' ')[0] || prev.firstName,
@@ -122,12 +131,16 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${remainingSec.toString().padStart(2, '0')}`;
   };
 
-  const selectedPropertyLead = useMemo(() => leads.find((l) => l.id === associatedLeadId), [leads, associatedLeadId]);
+  const selectedPropertyLead = useMemo(
+    () => leads.find((l) => l.id === associatedLeadId),
+    [leads, associatedLeadId]
+  );
 
-  // PropertyLinkPicker selection: link the lead + auto-fill contact only if empty (old dropdown behavior)
-  const handleLeadSelect = (id: string) => {
-    setAssociatedLeadId(id);
-    const lead = leads.find((l) => l.id === id);
+  // DealLinkPicker change handler: update links + auto-fill contact if empty
+  const handleLinkChange = (ids: string[]) => {
+    setLinkedDealIds(ids);
+    const newest = ids[ids.length - 1];
+    const lead = leads.find((l) => l.id === newest);
     if (!lead) return;
     setContactSnapshot((prev) => {
       if (prev.firstName || prev.phone) return prev;
@@ -171,8 +184,9 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
     setIsSaving(true);
     try {
       const fullContactName = `${contactFirstName.trim()} ${contactLastName.trim()}`.trim();
-      // Only create CRM records for brand-new (unsaved) contacts — the picker
-      // already saved anything marked isExistingContactSelected, so no dupes.
+      const shouldAttachContact = linkDealMode && attachContactToDeal && linkedDealIds.length > 0;
+
+      // Only create CRM records for brand-new (unsaved) contacts
       if (!contactSnapshot.isExistingContactSelected) {
         if (contactRole === 'CASH_BUYER' && onAddBuyer) {
           try {
@@ -209,15 +223,22 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
               phone: contactPhone, email: contactEmail, company: contactCompany || contactDraft.company,
               associatedPropertyAddress: selectedPropertyLead ? selectedPropertyLead.propertyAddress : undefined,
               leadId: associatedLeadId || undefined,
+              // NEW: stamp the linked deal(s) onto the brand-new contact record
+              dealIds: shouldAttachContact ? linkedDealIds : undefined,
               notes: contactDraft.notes,
               source: 'CALL_LOG',
             });
           } catch (err) { console.error('Failed to create CRM contact:', err); }
         }
       }
+
       await onSaveCall({
         leadId: associatedLeadId || undefined,
         leadAddress: selectedPropertyLead ? selectedPropertyLead.propertyAddress : undefined,
+        dealIds: linkDealMode ? linkedDealIds : undefined,
+        // NEW: tells the parent to sync an EXISTING contact onto the deal too
+        attachContactToDeal: shouldAttachContact,
+        contactDealIds: shouldAttachContact ? linkedDealIds : undefined,
         contactName: fullContactName, contactFirstName, contactLastName, contactPhone, contactRole,
         timestamp: new Date().toISOString(),
         durationSeconds: durationSeconds || 120,
@@ -285,23 +306,71 @@ export const CallLogModal: React.FC<CallLogModalProps> = ({
               </div>
             </div>
 
-            {/* 1. Property Link + Dossier + Quick Add (external brick) */}
-            <PropertyLinkPicker
-              leads={leads}
-              properties={properties}
-              callLogs={callLogs}
-              selectedLeadId={associatedLeadId}
-              onSelectLead={handleLeadSelect}
-              onUnlink={() => setAssociatedLeadId('')}
-              territories={territories}
-              selectedTerritoryId={selectedTerritoryId}
-              currentContact={{ firstName: contactFirstName, lastName: contactLastName, phone: contactPhone, role: contactRole }}
-              onSaveLead={onSaveLead}
-              onCreateProperty={onCreateProperty}
-              onContactSuggestion={(s) => setContactSnapshot((prev) => ({ ...prev, firstName: s.firstName, lastName: s.lastName, phone: s.phone, role: s.role, draft: { ...prev.draft, role: s.role } }))}
-            />
+            {/* ── Mode Toggle Checkbox ──────────────────────────────────────── */}
+            <label className="flex items-center gap-3 p-3 bg-slate-900/60 border border-amber-500/30 rounded-xl cursor-pointer hover:border-amber-500/50 transition-colors">
+              <input
+                type="checkbox"
+                checked={linkDealMode}
+                onChange={(e) => {
+                  setLinkDealMode(e.target.checked);
+                  // No linked deal = no reason to attach the contact to a deal
+                  if (!e.target.checked) setAttachContactToDeal(false);
+                }}
+                className="w-4 h-4 rounded accent-amber-500 cursor-pointer shrink-0"
+              />
+              <div>
+                <span className="block text-xs font-bold text-amber-400">Add/Link deal + add/link property</span>
+                <span className="block text-[10px] text-slate-500 mt-0.5">
+                  {linkDealMode
+                    ? 'Deal mode ON — attach this call to a deal (search or quick-add) + property.'
+                    : 'Deal mode OFF — log this call against a contact only.'}
+                </span>
+              </div>
+            </label>
 
-            {/* 2. Contacts (external brick) */}
+            {/* 1. Deal Link Picker (ONLY when checkbox is checked) */}
+            {linkDealMode && (
+              <DealLinkPicker
+                linkedDealIds={linkedDealIds}
+                onLinkChange={handleLinkChange}
+                availableDeals={leads}
+                label="Link to Deal (Searchable)"
+                onCreateDeal={onSaveLead}
+                onCreateProperty={onCreateProperty}
+                territories={territories}
+                properties={properties}
+                callLogs={callLogs}
+                currentContact={{ firstName: contactFirstName, lastName: contactLastName, phone: contactPhone, role: contactRole }}
+              />
+            )}
+
+            {/* ── NEW: Attach-contact-to-deal checkbox (ONLY when deal mode is ON) ── */}
+            {linkDealMode && (
+              <label className="flex items-start gap-3 p-3 bg-slate-900/60 border border-emerald-500/30 rounded-xl cursor-pointer hover:border-emerald-500/50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={attachContactToDeal}
+                  onChange={(e) => setAttachContactToDeal(e.target.checked)}
+                  className="w-4 h-4 rounded accent-emerald-500 cursor-pointer shrink-0 mt-0.5"
+                />
+                <div>
+                  <span className="block text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5" /> Add this contact to the linked deal
+                  </span>
+                  <span className="block text-[10px] text-slate-500 mt-0.5">
+                    {attachContactToDeal
+                      ? `This call's contact will also be attached as a stakeholder on ${
+                          selectedPropertyLead
+                            ? `"${selectedPropertyLead.dealName || selectedPropertyLead.propertyAddress}"`
+                            : 'the linked deal'
+                        }.`
+                      : 'Leave unchecked to save the contact only to this call log.'}
+                  </span>
+                </div>
+              </label>
+            )}
+
+            {/* 2. Contacts (external brick — always visible) */}
             <ContactIntakePicker
               contacts={contacts}
               buyers={buyers}
